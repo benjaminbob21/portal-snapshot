@@ -1,3 +1,5 @@
 state/raw-last-response.txt
 __pycache__/
 .env
+state/keepalive.log
+state/keepalive.err

@@ -27,10 +27,9 @@ from pathlib import Path
 
 STATE = Path(__file__).resolve().parent.parent / "state" / "snapshot.json"
 
-DASHBOARD_URL = os.environ.get(
-    "PORTAL_API_URL",
+DASHBOARD_URL = os.environ.get("PORTAL_API_URL") or (
     "https://apply.careers.microsoft.com/careers/dashboard"
-    "?domain=microsoft.com&hl=en",
+    "?domain=microsoft.com&hl=en"
 )
 
 TILES = ["Applications", "Interviews", "Saved Jobs", "Events",

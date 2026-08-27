@@ -7,7 +7,8 @@ hours and pings Telegram when a status changes.
 
 ### 1. Capture your auth cookie
 
-1. Log in at https://careers.microsoft.com and open **My applications**
+1. Log in at https://apply.careers.microsoft.com (your dashboard shows the
+   Applications / Interviews / Saved Jobs / Events / Forms manager / Offers tiles)
 2. DevTools (Cmd+Opt+I) -> Network tab -> refresh the page
 3. Click the main page/API request -> Request Headers -> copy the whole `cookie:` header value
 

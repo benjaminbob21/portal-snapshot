@@ -216,6 +216,7 @@ def main():
 
     if not tiles and not jobs:
         # Can't read anything -> almost certainly logged out.
+        STATE.parent.mkdir(parents=True, exist_ok=True)
         (STATE.parent / "raw-last-response.txt").write_text(str(payload)[:5000])
         telegram("⚠️ MS career tracker: could not read dashboard "
                  "(auth expired?). Refresh PORTAL_COOKIE secret.")

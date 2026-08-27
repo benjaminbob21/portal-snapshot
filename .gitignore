@@ -1,0 +1,4 @@
+state/snapshot.json
+state/raw-last-response.txt
+__pycache__/
+.env

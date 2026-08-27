@@ -26,9 +26,10 @@ jobs:
         id: check
         env:
           PORTAL_COOKIE: ${{ secrets.PORTAL_COOKIE }}
+          PORTAL_CSRF: ${{ secrets.PORTAL_CSRF }}
+          PORTAL_UA: ${{ secrets.PORTAL_UA }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT }}
-          PORTAL_API_URL: ${{ vars.PORTAL_API_URL }}
         run: python scripts/track.py
 
       - name: Commit snapshot & history

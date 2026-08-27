@@ -1,25 +1,24 @@
 #!/usr/bin/env python3
-"""Microsoft career portal (Phenom) tracker for apply.careers.microsoft.com.
+"""Microsoft career portal tracker for apply.careers.microsoft.com (pcsx API).
 
-Watches the signed-in dashboard:
-  - the six summary tiles (Applications, Interviews, Saved Jobs, Events,
-    Forms manager, Offers) and
-  - the per-application list (title/location/status) when available,
+Watches:
+  - /api/pcsx/dashboard/summary       -> the six tile counts
+  - /api/pcsx/dashboard/applications  -> per-application entries
 
-snapshots them to state/snapshot.json, diffs against the previous run, and
-sends a Telegram message on any change (e.g. Applications 1 -> 2).
+Snapshots to state/snapshot.json, diffs against the previous run, and sends a
+Telegram message on any change (e.g. Applications 1 -> 2, status updates).
 
 Env:
-  PORTAL_COOKIE   raw Cookie header copied from DevTools (required)
+  PORTAL_COOKIE   raw cookie string from the browser session (required)
+  PORTAL_CSRF     x-csrf-token from the same request (required)
+  PORTAL_UA       user-agent of the browser used to capture the cookie
   TELEGRAM_TOKEN  bot token from @BotFather
-  TELEGRAM_CHAT   chat id from @userinfobot
-  PORTAL_API_URL  optional override for the data endpoint
+  TELEGRAM_CHAT   chat id
 """
 
-import html as htmllib
 import json
 import os
-import re
+import ssl
 import sys
 import time
 import urllib.request
@@ -27,170 +26,115 @@ from pathlib import Path
 
 STATE = Path(__file__).resolve().parent.parent / "state" / "snapshot.json"
 
-DASHBOARD_URL = os.environ.get("PORTAL_API_URL") or (
-    "https://apply.careers.microsoft.com/careers/dashboard"
-    "?domain=microsoft.com&hl=en"
-)
+BASE = "https://apply.careers.microsoft.com"
+SUMMARY_URL = BASE + "/api/pcsx/dashboard/summary"
+APPLICATIONS_URL = BASE + "/api/pcsx/dashboard/applications"
 
-TILES = ["Applications", "Interviews", "Saved Jobs", "Events",
-         "Forms manager", "Offers"]
+# Tile label -> summary key
+TILE_KEYS = {
+    "Applications": "applications",
+    "Interviews": "interviews",
+    "Saved Jobs": "savedpositions",
+    "Events": "events",
+    "Forms manager": "forms",
+    "Offers": "offers",
+}
 
-UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-      "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36")
+DEFAULT_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+              "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 "
+              "Safari/605.1.15")
 
 
-def _get(url, accept):
+def _get_json(url):
     cookie = os.environ.get("PORTAL_COOKIE", "").strip()
-    if not cookie:
-        sys.exit("PORTAL_COOKIE not set")
+    csrf = os.environ.get("PORTAL_CSRF", "").strip()
+    if not cookie or not csrf:
+        sys.exit("PORTAL_COOKIE / PORTAL_CSRF not set")
     req = urllib.request.Request(url)
     req.add_header("Cookie", cookie)
-    req.add_header("User-Agent", UA)
-    req.add_header("Accept", accept)
-    req.add_header("X-Requested-With", "XMLHttpRequest")
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return r.read().decode("utf-8", "replace")
-
-
-def fetch():
-    """Return (source_url, payload). Try JSON endpoints first, then the page."""
-    candidates = []
-    if "/api/" in DASHBOARD_URL or DASHBOARD_URL.endswith(".json"):
-        candidates.append(DASHBOARD_URL)
-    base = "https://apply.careers.microsoft.com"
-    candidates += [
-        base + "/api/apply/v2/candidate/dashboard?domain=microsoft.com&hl=en",
-        base + "/widgets?domain=microsoft.com&hl=en",
-    ]
-    for url in candidates:
+    req.add_header("x-csrf-token", csrf)
+    req.add_header("Accept", "application/json")
+    req.add_header("User-Agent", os.environ.get("PORTAL_UA") or DEFAULT_UA)
+    req.add_header("Referer", BASE + "/careers/dashboard"
+                                  "?domain=microsoft.com&hl=en")
+    ctx = ssl.create_default_context()
+    if not ctx.get_ca_certs():
         try:
-            raw = _get(url, "application/json")
-            return url, json.loads(raw)
+            import certifi
+            ctx = ssl.create_default_context(cafile=certifi.where())
         except Exception:
-            continue
-
-    # Fall back to the dashboard page itself (HTML or embedded state JSON).
-    try:
-        raw = _get(DASHBOARD_URL, "text/html")
-        try:
-            return DASHBOARD_URL, json.loads(raw)
-        except Exception:
-            return DASHBOARD_URL, raw
-    except Exception as e:
-        sys.exit(f"portal fetch failed: {e}")
+            ctx = ssl._create_unverified_context()
+    with urllib.request.urlopen(req, timeout=30, context=ctx) as r:
+        payload = json.load(r)
+    if not isinstance(payload, dict) or payload.get("status") != 200:
+        raise RuntimeError(f"unexpected response from {url}: "
+                           f"{str(payload)[:200]}")
+    return payload.get("data") or {}
 
 
-def _norm_count(v):
-    if v is None:
-        return None
-    if isinstance(v, (int, float)):
-        return int(v)
-    s = str(v).strip()
-    if s in ("", "-", "–"):
-        return 0
-    m = re.search(r"\d+", s)
-    return int(m.group()) if m else None
-
-
-def extract_tiles(payload):
-    """Find the six dashboard tile values in JSON or HTML. None if absent."""
+def fetch_summary():
+    data = _get_json(SUMMARY_URL)
+    counts = (data.get("count") or {})
     tiles = {}
-
-    def scan_json(obj):
-        if isinstance(obj, dict):
-            low = {k.lower().replace(" ", "").replace("_", ""): v
-                   for k, v in obj.items()}
-            for label in TILES:
-                if label in tiles:
-                    continue
-                key = label.lower().replace(" ", "")
-                if key in low:
-                    lv = low[key]
-                    val = lv.get("count") if isinstance(lv, dict) else lv
-                    c = _norm_count(val)
-                    if c is not None:
-                        tiles[label] = c
-            for v in obj.values():
-                scan_json(v)
-        elif isinstance(obj, list):
-            for v in obj:
-                scan_json(v)
-
-    if isinstance(payload, (dict, list)):
-        scan_json(payload)
-    if tiles:
-        return tiles
-
-    if isinstance(payload, str):
-        text = htmllib.unescape(payload)
-        for label in TILES:
-            # label ... nearest number or dash within the following 400 chars
-            m = re.search(
-                re.escape(label) + r".{0,400}?>\s*(-|\d+)\s*<", text, re.S | re.I)
-            if m:
-                tiles[label] = _norm_count(m.group(1))
-        if tiles:
-            return tiles
-    return None
-
-
-def extract_jobs(payload):
-    """Normalize Phenom application list into {job_id: {...}} or None."""
-    items = None
-    if isinstance(payload, dict):
-        data = payload.get("data") or payload
-        for key in ("myApplicationsList", "jobs", "applications", "results"):
-            v = data.get(key) if isinstance(data, dict) else None
-            if isinstance(v, list):
-                items = v
-                break
-            if isinstance(v, dict) and isinstance(v.get("list"), list):
-                items = v["list"]
-                break
-        if items is None and isinstance(data, list):
-            items = data
-    if not isinstance(items, list):
-        return None
-
-    jobs = {}
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-        jid = str(it.get("reqId") or it.get("jobSeqNo")
-                  or it.get("id") or it.get("title"))
-        status = it.get("status") or it.get("statusBag") \
-            or it.get("workflowState") or ""
-        if isinstance(status, dict):
-            status = status.get("status") or json.dumps(status)
-        jobs[jid] = {
-            "title": str(it.get("title", "")),
-            "location": str(it.get("location", "") or it.get("postedLocation", "")),
-            "status": str(status),
-            "updated": str(it.get("lastUpdatedDate") or it.get("appliedDate", "")),
+    for label, key in TILE_KEYS.items():
+        entry = counts.get(key) or {}
+        tiles[label] = {
+            "total": entry.get("totalCount", 0),
+            "actionable": entry.get("actionableItemsCount", 0),
         }
-    return jobs or None
+    return tiles
 
 
-def diff(state_old, state_new):
+def fetch_applications():
+    data = _get_json(APPLICATIONS_URL)
+    items = data.get("applications") or []
+    apps = {}
+    for it in items:
+        aid = str(it.get("applicationId") or it.get("pid") or it.get("displayJobId"))
+        apps[aid] = {
+            "title": it.get("positionTitle", ""),
+            "location": it.get("positionLocation", ""),
+            "status": it.get("currentStatus", ""),
+            "applied_on": it.get("appliedOn", ""),
+            "withdrawn": bool(it.get("isWithdrawn")),
+        }
+    return apps
+
+
+def flatten(state):
+    out = {}
+    for label, v in state.get("tiles", {}).items():
+        out[f"tile:{label}"] = v
+    for aid, v in state.get("applications", {}).items():
+        out[f"app:{aid}"] = v
+    return out
+
+
+def diff(old, new):
+    fo, fn = flatten(old), flatten(new)
     lines = []
-    ot, nt = state_old.get("tiles", {}), state_new.get("tiles", {})
-    for label in TILES:
-        if label in nt:
-            if label not in ot:
-                lines.append(f"🆕 {label}: {nt[label]} (first reading)")
-            elif ot[label] != nt[label]:
-                lines.append(f"🔁 {label}: {ot[label]} ➜ {nt[label]}")
-    oj, nj = state_old.get("applications", {}), state_new.get("applications", {})
-    for jid in sorted(nj):
-        n = nj[jid]
-        if jid not in oj:
-            lines.append(f"🆕 APP: {n['title']} ({n['location']}) -> {n['status']}")
+    for key in sorted(fn):
+        n = fn[key]
+        if key not in fo:
+            lines.append(f"🆕 {key}: {json.dumps(n, ensure_ascii=False)}")
+            continue
+        o = fo[key]
+        if o == n:
+            continue
+        if key.startswith("tile:"):
+            label = key[5:]
+            for field in ("total", "actionable"):
+                if o.get(field) != n.get(field):
+                    lines.append(f"🔁 {label}: {o.get(field)} ➜ {n.get(field)}")
         else:
-            o = oj[jid]
-            if o["status"] != n["status"]:
-                lines.append(f"🔁 {n['title']}: {o['status']} ➜ {n['status']}")
-            elif o["updated"] != n["updated"]:
-                lines.append(f"🔁 {n['title']}: update timestamp changed")
+            title = n.get("title") or key
+            for field in ("status", "withdrawn", "location"):
+                if o.get(field) != n.get(field):
+                    lines.append(f"🔁 {title}: {field} {o.get(field)} ➜ "
+                                 f"{n.get(field)}")
+    for key in sorted(set(fo) - set(fn)):
+        if key.startswith("app:"):
+            lines.append(f"❌ removed: {fo[key].get('title') or key}")
     return lines
 
 
@@ -209,20 +153,17 @@ def telegram(text):
 
 
 def main():
-    source, payload = fetch()
+    try:
+        tiles = fetch_summary()
+        apps = fetch_applications()
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            telegram("⚠️ MS career tracker: portal rejected the session "
+                     f"(HTTP {e.code}). Refresh PORTAL_COOKIE/PORTAL_CSRF.")
+            sys.exit(1)
+        raise
 
-    tiles = extract_tiles(payload)
-    jobs = extract_jobs(payload)
-
-    if not tiles and not jobs:
-        # Can't read anything -> almost certainly logged out.
-        STATE.parent.mkdir(parents=True, exist_ok=True)
-        (STATE.parent / "raw-last-response.txt").write_text(str(payload)[:5000])
-        telegram("⚠️ MS career tracker: could not read dashboard "
-                 "(auth expired?). Refresh PORTAL_COOKIE secret.")
-        sys.exit(1)
-
-    new_state = {"tiles": tiles or {}, "applications": jobs or {}}
+    new_state = {"tiles": tiles, "applications": apps}
     old_state = {}
     if STATE.exists():
         try:
@@ -236,16 +177,16 @@ def main():
     STATE.write_text(json.dumps(new_state, indent=2))
     stamp = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
     with open(STATE.parent / "history.log", "a") as f:
-        f.write(f"{stamp} source={source} tiles={tiles} "
-                f"apps={len(new_state['applications'])} changes={len(changes)}\n")
+        f.write(f"{stamp} apps={len(apps)} changes={len(changes)}\n")
 
     if changes:
         summary = "\n".join(changes)
         telegram(f"📋 Microsoft portal update:\n\n{summary}")
         print(summary)
     else:
-        print(f"No changes (tiles: {tiles}, "
-              f"{len(new_state['applications'])} applications)")
+        print(f"No changes (tiles: "
+              f"{ {k: v['total'] for k, v in tiles.items()} }, "
+              f"{len(apps)} applications)")
 
 
 if __name__ == "__main__":

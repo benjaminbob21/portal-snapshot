@@ -1,0 +1,37 @@
+{
+  "tiles": {
+    "Applications": {
+      "total": 1,
+      "actionable": 0
+    },
+    "Interviews": {
+      "total": 0,
+      "actionable": 0
+    },
+    "Saved Jobs": {
+      "total": 0,
+      "actionable": 0
+    },
+    "Events": {
+      "total": 0,
+      "actionable": 0
+    },
+    "Forms manager": {
+      "total": 0,
+      "actionable": 0
+    },
+    "Offers": {
+      "total": 1,
+      "actionable": 0
+    }
+  },
+  "applications": {
+    "300001599": {
+      "title": "Software Engineer Intern",
+      "location": "United States, Georgia, Atlanta",
+      "status": "Internship",
+      "applied_on": "Nov 03 2025",
+      "withdrawn": false
+    }
+  }
+}

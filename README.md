@@ -1,7 +1,7 @@
 # MS Career Portal Tracker
 
-GitHub Action that checks your Microsoft careers portal applications every 6
-hours and pings Telegram when a status changes.
+GitHub Action that checks your Microsoft careers portal applications every 30
+minutes and pings Telegram when a status changes.
 
 ## One-time setup
 
@@ -40,4 +40,6 @@ manually, verify the snapshot lands in `state/snapshot.json`.
 
 - **Auth expires:** Microsoft cookies rotate periodically. If parsing fails,
   the bot DMs you a warning -- repeat step 1, update the secret.
-- **Cadence:** change the cron in `.github/workflows/track.yml`.
+- **Cadence:** change the cron in `.github/workflows/track.yml` (currently every
+  30 minutes). Session keep-alive runs every 20 min on the VM (VM cron) so the
+  cookie never lapses.

@@ -2,7 +2,7 @@ name: track-portal
 
 on:
   schedule:
-    - cron: "0 */6 * * *" # every 6 hours
+    - cron: "*/30 * * * *" # every 30 minutes
   workflow_dispatch: {}    # manual run button
 
 permissions:

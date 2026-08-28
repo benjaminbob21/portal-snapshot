@@ -154,8 +154,8 @@ def diff(old, new):
 
 
 def telegram(text):
-    token = os.environ.get("TELEGRAM_TOKEN", "")
-    chat = os.environ.get("TELEGRAM_CHAT", "")
+    token = os.environ.get("TELEGRAM_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    chat = os.environ.get("TELEGRAM_CHAT") or os.environ.get("TELEGRAM_CHAT_ID", "")
     if not (token and chat):
         print("Telegram not configured; skipping notify")
         return

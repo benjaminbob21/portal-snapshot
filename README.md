@@ -1,45 +1,20 @@
 # MS Career Portal Tracker
 
-GitHub Action that checks your Microsoft careers portal applications every 30
-minutes and pings Telegram when a status changes.
+Monitors your Microsoft careers portal dashboard (Phenom/pcsx API) and sends instant Telegram alerts when any application status or dashboard tile changes.
 
-## One-time setup
+## Architecture
 
-### 1. Capture your auth cookie
+- **Host:** Ubuntu VM (`~/msft-career-tracker`)
+- **Cadence:** Cron job runs `scripts/run-tracker.sh` every 15 minutes.
+- **Session keep-alive:** Every probe automatically captures the rotated `session=` cookie from Microsoft and self-updates `.env` in place.
+- **Notifications:** Telegram message on any tile/application change or on auth failure (HTTP 401/403).
 
-1. Log in at https://apply.careers.microsoft.com (your dashboard shows the
-   Applications / Interviews / Saved Jobs / Events / Forms manager / Offers tiles)
-2. DevTools (Cmd+Opt+I) -> Network tab -> refresh the page
-3. Click the main page/API request -> Request Headers -> copy the whole `cookie:` header value
+## Checked Endpoints
 
-### 2. Create a Telegram bot
-
-1. Message **@BotFather** -> `/newbot` -> save the token
-2. Message your new bot once ("hi"), then message **@userinfobot** to get your chat id
-
-### 3. Add repo secrets + variable
-
-| Name | Type | Value |
-|---|---|---|
-| `PORTAL_COOKIE` | Secret | cookie header from step 1 |
-| `TELEGRAM_TOKEN` | Secret | BotFather token |
-| `TELEGRAM_CHAT` | Secret | chat id from step 2 |
-| `PORTAL_API_URL` | Variable | see below |
-
-`PORTAL_API_URL` must point at the JSON endpoint that returns your application
-list. The default in `scripts/track.py` points at the search page; if it 404s,
-inspect DevTools for an XHR request returning `myApplicationsList` style JSON
-and use that URL.
-
-### 4. Push and run once
-
-Push this repo to GitHub, open the Actions tab, run **track-portal**
-manually, verify the snapshot lands in `state/snapshot.json`.
+- `/api/pcsx/dashboard/summary` (Applications, Interviews, Saved Jobs, Events, Forms, Offers)
+- `/api/pcsx/dashboard/applications` (per-application title, location, status, withdrawn flag)
 
 ## Maintenance
 
-- **Auth expires:** Microsoft cookies rotate periodically. If parsing fails,
-  the bot DMs you a warning -- repeat step 1, update the secret.
-- **Cadence:** change the cron in `.github/workflows/track.yml` (currently every
-  30 minutes). Session keep-alive runs every 20 min on the VM (VM cron) so the
-  cookie never lapses.
+- **Auth expired (HTTP 401/403):** You will get an immediate Telegram alert. Re-grab the curl from your browser Network tab, update `.env` on the VM, and run `bash scripts/run-tracker.sh`.
+- **Logs:** Check `state/track-cron.log` and `state/history.log` on the VM.

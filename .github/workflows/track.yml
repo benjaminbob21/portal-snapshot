@@ -40,7 +40,7 @@ jobs:
           PORTAL_UA: ${{ secrets.PORTAL_UA }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GH_PAT }} # GITHUB_TOKEN cannot write secrets
           REPO: ${{ github.repository }}
         run: |
           set -uo pipefail

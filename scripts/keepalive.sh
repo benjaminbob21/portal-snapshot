@@ -3,12 +3,13 @@
 # GitHub secret so CI keeps working. Designed to run on Bob's Mac every
 # 20 minutes via launchd (com.bob.msft-portal-keepalive.plist).
 #
-# Requires: gh authenticated (gh auth login), and .env in the repo folder
+# Layout: repo at $REPO_DIR (default ~/msft-career-tracker; works on the
+# Ubuntu VM and on macOS). Requires gh authenticated + .env in the repo folder.
 # with PORTAL_API_URL, PORTAL_COOKIE, PORTAL_CSRF, PORTAL_UA.
 
 set -euo pipefail
 
-REPO_DIR="$HOME/Downloads/msft-career-tracker"
+REPO_DIR="${REPO_DIR:-$HOME/msft-career-tracker}"
 ENV_FILE="$REPO_DIR/.env"
 REPO="benjaminbob21/msft-career-tracker"
 LOG="$REPO_DIR/state/keepalive.log"

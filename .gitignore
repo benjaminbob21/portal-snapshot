@@ -3,3 +3,4 @@ __pycache__/
 .env
 state/keepalive.log
 state/keepalive.err
+state/rotated-session.txt

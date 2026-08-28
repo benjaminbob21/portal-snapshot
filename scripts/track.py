@@ -18,6 +18,7 @@ Env:
 
 import json
 import os
+import re
 import ssl
 import sys
 import time
@@ -25,6 +26,7 @@ import urllib.request
 from pathlib import Path
 
 STATE = Path(__file__).resolve().parent.parent / "state" / "snapshot.json"
+ROTATED_SESSION = Path(__file__).resolve().parent.parent / "state" / "rotated-session.txt"
 
 BASE = "https://apply.careers.microsoft.com"
 SUMMARY_URL = BASE + "/api/pcsx/dashboard/summary"
@@ -65,6 +67,19 @@ def _get_json(url):
         except Exception:
             ctx = ssl._create_unverified_context()
     with urllib.request.urlopen(req, timeout=30, context=ctx) as r:
+        # The portal rotates the `session` cookie on most responses; capture
+        # it so a long-running probe loop can stay authenticated. Note: the
+        # response has multiple Set-Cookie headers; get() returns only the
+        # first, so scan get_all().
+        for sc in (r.headers.get_all("Set-Cookie") or []):
+            m = re.search(r"session=([^;]+)", sc)
+            if m:
+                try:
+                    ROTATED_SESSION.parent.mkdir(parents=True, exist_ok=True)
+                    ROTATED_SESSION.write_text(m.group(1))
+                except Exception:
+                    pass
+                break
         payload = json.load(r)
     if not isinstance(payload, dict) or payload.get("status") != 200:
         raise RuntimeError(f"unexpected response from {url}: "

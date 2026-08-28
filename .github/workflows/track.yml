@@ -1,12 +1,22 @@
 name: track-portal
 
+# Inspired by oci-a1-grabber: cron fires are an hourly heartbeat (GitHub
+# heavily delays high-frequency crons like every-5-min), and each run probes
+# the portal every 5 minutes for ~50 minutes — so one fire covers a whole
+# hour with near-continuous monitoring at ~740 Actions minutes/month.
+#
+# Each probe also captures the rotated session cookie; if the portal hands
+# back a fresh `session`, the job pushes it to the PORTAL_COOKIE secret so
+# the loop (and future runs) stay authenticated on their own.
+
 on:
   schedule:
-    - cron: "*/30 * * * *" # every 30 minutes
-  workflow_dispatch: {}    # manual run button
+    - cron: "7 * * * *" # hourly heartbeat (odd minute avoids top-of-hour crunch)
+  workflow_dispatch: {}
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: track-portal
@@ -15,6 +25,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
 
@@ -22,15 +33,57 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Check portal for updates
-        id: check
+      - name: Probe loop (every 5 min for ~50 min)
         env:
           PORTAL_COOKIE: ${{ secrets.PORTAL_COOKIE }}
           PORTAL_CSRF: ${{ secrets.PORTAL_CSRF }}
           PORTAL_UA: ${{ secrets.PORTAL_UA }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT }}
-        run: python scripts/track.py
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          deadline=$(( $(date +%s) + 3000 ))   # ~50 min of probing
+          i=0
+          fails=0
+          while :; do
+            i=$((i+1))
+            echo "--- probe #$i $(date -u +%H:%M:%S)Z ---"
+            set +e
+            python scripts/track.py
+            code=$?
+            set -e
+
+            # 1 = auth expired / unreadable; the script already DM'd Telegram.
+            # Tolerate a couple of transient failures before bailing.
+            if [ "$code" = "1" ]; then
+              fails=$((fails + 1))
+              echo "auth/read failure #$fails"
+              if [ "$fails" -ge 3 ]; then
+                echo "Giving up until next heartbeat."
+                exit 1
+              fi
+            fi
+
+            # Session rotation: if the portal gave a fresh cookie, persist it
+            # to the secret so the next probes/runs stay logged in.
+            if [ -f state/rotated-session.txt ]; then
+              new_sess=$(cat state/rotated-session.txt)
+              old_sess=$(printf '%s' "$PORTAL_COOKIE" | sed -n 's/.*session=\([^;]*\).*/\1/p')
+              if [ -n "$new_sess" ] && [ "$new_sess" != "$old_sess" ]; then
+                new_cookie=$(printf '%s' "$PORTAL_COOKIE" | sed "s/session=[^;]*/session=$new_sess/")
+                if gh secret set PORTAL_COOKIE -R "$REPO" --body "$new_cookie"; then
+                  echo "rotated session cookie -> secret updated"
+                  PORTAL_COOKIE="$new_cookie"
+                fi
+              fi
+              rm -f state/rotated-session.txt
+            fi
+
+            [ "$(date +%s)" -ge "$deadline" ] && { echo "50 min window done."; exit 0; }
+            sleep 300
+          done
 
       - name: Commit snapshot & history
         run: |

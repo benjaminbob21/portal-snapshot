@@ -1,13 +1,12 @@
 name: snapshot-sync
 
-# Heartbeat cron (GitHub heavily delays high-frequency crons like every-5-min),
-# so each run probes the endpoint every 5 minutes for ~50 minutes — one fire
-# covers a whole hour with near-continuous monitoring. Public repos get
-# unlimited Actions minutes, so this is free to run 24/7.
+# Continuous 6-hour spans: cron fires every 6 hours, each run probes
+# every 5 minutes for ~5h55m — near-zero downtime between spans.
+# Public repo = unlimited Actions minutes.
 
 on:
   schedule:
-    - cron: "7 * * * *" # hourly heartbeat
+    - cron: "7 */6 * * *"  # minute 7 of hours 0,6,12,18 (UTC)
   workflow_dispatch: {}
 
 permissions:
@@ -21,7 +20,7 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 360  # 6 hours max
     steps:
       - uses: actions/checkout@v4
 
@@ -29,14 +28,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Probe loop (every 5 min for ~50 min)
+      - name: Probe loop (every 5 min for ~5h55m)
         env:
           PORTAL_COOKIE: ${{ secrets.PORTAL_COOKIE }}
           PORTAL_CSRF: ${{ secrets.PORTAL_CSRF }}
           PORTAL_UA: ${{ secrets.PORTAL_UA }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT }}
-          GH_TOKEN: ${{ secrets.GH_PAT }} # GITHUB_TOKEN cannot write secrets
+          GH_TOKEN: ${{ secrets.GH_PAT }}
           REPO: ${{ github.repository }}
           SNAPSHOT_STATE: ${{ secrets.SNAPSHOT_STATE }}
         run: |
@@ -49,7 +48,7 @@ jobs:
             echo "restored snapshot from secret"
           fi
 
-          deadline=$(( $(date +%s) + 3000 ))   # ~50 min of probing
+          deadline=$(( $(date +%s) + 21300 ))   # ~5h55m of probing (6h - 5m buffer)
           i=0
           fails=0
           while :; do
@@ -61,21 +60,18 @@ jobs:
             set -e
 
             # 1 = auth expired / unreadable; the script already DM'd Telegram.
-
             # Tolerate a couple of transient failures before bailing.
-
             if [ "$code" = "1" ]; then
               fails=$((fails + 1))
               echo "auth/read failure #$fails"
               if [ "$fails" -ge 3 ]; then
-                echo "Giving up until next heartbeat."
+                echo "Giving up until next span."
                 exit 1
               fi
             fi
 
             # Session rotation: if the portal gave a fresh cookie, persist it
             # to the secret so the next probes/runs stay logged in.
-
             if [ -f state/rotated-session.txt ]; then
               new_sess=$(cat state/rotated-session.txt)
               old_sess=$(printf '%s' "$PORTAL_COOKIE" | sed -n 's/.*session=\([^;]*\).*/\1/p')
@@ -89,7 +85,7 @@ jobs:
               rm -f state/rotated-session.txt
             fi
 
-            [ "$(date +%s)" -ge "$deadline" ] && { echo "50 min window done."; exit 0; }
+            [ "$(date +%s)" -ge "$deadline" ] && { echo "5h55m window done."; exit 0; }
             sleep 300
           done
 

@@ -1,6 +1,8 @@
-state/raw-last-response.txt
-__pycache__/
 .env
+__pycache__/
+state/raw-last-response.txt
 state/keepalive.log
 state/keepalive.err
 state/rotated-session.txt
+state/snapshot.json
+state/track-cron.log

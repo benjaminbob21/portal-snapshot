@@ -1,17 +1,13 @@
-name: track-portal
+name: snapshot-sync
 
-# Inspired by oci-a1-grabber: cron fires are an hourly heartbeat (GitHub
-# heavily delays high-frequency crons like every-5-min), and each run probes
-# the portal every 5 minutes for ~50 minutes — so one fire covers a whole
-# hour with near-continuous monitoring at ~740 Actions minutes/month.
-#
-# Each probe also captures the rotated session cookie; if the portal hands
-# back a fresh `session`, the job pushes it to the PORTAL_COOKIE secret so
-# the loop (and future runs) stay authenticated on their own.
+# Heartbeat cron (GitHub heavily delays high-frequency crons like every-5-min),
+# so each run probes the endpoint every 5 minutes for ~50 minutes — one fire
+# covers a whole hour with near-continuous monitoring. Public repos get
+# unlimited Actions minutes, so this is free to run 24/7.
 
 on:
   schedule:
-    - cron: "7 * * * *" # hourly heartbeat (odd minute avoids top-of-hour crunch)
+    - cron: "7 * * * *" # hourly heartbeat
   workflow_dispatch: {}
 
 permissions:
@@ -19,11 +15,11 @@ permissions:
   actions: write
 
 concurrency:
-  group: track-portal
+  group: snapshot-sync
   cancel-in-progress: false
 
 jobs:
-  check:
+  sync:
     runs-on: ubuntu-latest
     timeout-minutes: 55
     steps:
@@ -42,8 +38,17 @@ jobs:
           TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT }}
           GH_TOKEN: ${{ secrets.GH_PAT }} # GITHUB_TOKEN cannot write secrets
           REPO: ${{ github.repository }}
+          SNAPSHOT_STATE: ${{ secrets.SNAPSHOT_STATE }}
         run: |
           set -uo pipefail
+
+          # Restore the last known snapshot from the secret (never committed to git)
+          if [ -n "$SNAPSHOT_STATE" ]; then
+            mkdir -p state
+            printf '%s\n' "$SNAPSHOT_STATE" > state/snapshot.json
+            echo "restored snapshot from secret"
+          fi
+
           deadline=$(( $(date +%s) + 3000 ))   # ~50 min of probing
           i=0
           fails=0
@@ -56,7 +61,9 @@ jobs:
             set -e
 
             # 1 = auth expired / unreadable; the script already DM'd Telegram.
+
             # Tolerate a couple of transient failures before bailing.
+
             if [ "$code" = "1" ]; then
               fails=$((fails + 1))
               echo "auth/read failure #$fails"
@@ -68,6 +75,7 @@ jobs:
 
             # Session rotation: if the portal gave a fresh cookie, persist it
             # to the secret so the next probes/runs stay logged in.
+
             if [ -f state/rotated-session.txt ]; then
               new_sess=$(cat state/rotated-session.txt)
               old_sess=$(printf '%s' "$PORTAL_COOKIE" | sed -n 's/.*session=\([^;]*\).*/\1/p')
@@ -85,14 +93,24 @@ jobs:
             sleep 300
           done
 
-      - name: Commit snapshot & history
+      - name: Persist snapshot to secret
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          REPO: ${{ github.repository }}
         run: |
-          git config user.name "portal-tracker"
+          if [ -f state/snapshot.json ]; then
+            gh secret set SNAPSHOT_STATE -R "$REPO" --body "$(cat state/snapshot.json)"
+            echo "snapshot persisted to secret"
+          fi
+
+      - name: Commit history log
+        run: |
+          git config user.name "snapshot-sync"
           git config user.email "actions@github.com"
-          git add state/
+          git add state/history.log
           if git diff --cached --quiet; then
             echo "nothing to commit"
           else
-            git commit -m "snapshot update $(date -u +%F)"
+            git commit -m "history update $(date -u +%F)"
             git push
           fi

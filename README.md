@@ -1,20 +1,17 @@
-# MS Career Portal Tracker
+# portal-snapshot
 
-Monitors your Microsoft careers portal dashboard (Phenom/pcsx API) and sends instant Telegram alerts when any application status or dashboard tile changes.
+A small utility that periodically captures a snapshot of a remote dashboard
+and stores it locally. Designed to run unattended in a CI environment.
 
-## Architecture
+## Usage
 
-- **Host:** Ubuntu VM (`~/msft-career-tracker`)
-- **Cadence:** Cron job runs `scripts/run-tracker.sh` every 15 minutes.
-- **Session keep-alive:** Every probe automatically captures the rotated `session=` cookie from Microsoft and self-updates `.env` in place.
-- **Notifications:** Telegram message on any tile/application change or on auth failure (HTTP 401/403).
+1. Configure the required environment variables (see `.github/workflows/snapshot.yml`).
+2. Push to GitHub. The workflow runs on a schedule and commits the snapshot
+   to the `state/` folder.
+3. Inspect `state/snapshot.json` for the latest captured state.
 
-## Checked Endpoints
+## Notes
 
-- `/api/pcsx/dashboard/summary` (Applications, Interviews, Saved Jobs, Events, Forms, Offers)
-- `/api/pcsx/dashboard/applications` (per-application title, location, status, withdrawn flag)
-
-## Maintenance
-
-- **Auth expired (HTTP 401/403):** You will get an immediate Telegram alert. Re-grab the curl from your browser Network tab, update `.env` on the VM, and run `bash scripts/run-tracker.sh`.
-- **Logs:** Check `state/track-cron.log` and `state/history.log` on the VM.
+- The snapshot is diffed against the previous one; changes are logged to
+  `state/history.log`.
+- No external services are required beyond the configured endpoint.

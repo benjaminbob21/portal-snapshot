@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Microsoft career portal tracker for apply.careers.microsoft.com (pcsx API).
+"""Dashboard snapshot poller.
 
 Watches:
-  - /api/pcsx/dashboard/summary       -> the six tile counts
-  - /api/pcsx/dashboard/applications  -> per-application entries
+  - /api/pcsx/dashboard/summary       -> tile counts
+  - /api/pcsx/dashboard/applications  -> per-item entries
 
-Snapshots to state/snapshot.json, diffs against the previous run, and sends a
-Telegram message on any change (e.g. Applications 1 -> 2, status updates).
+Snapshots to state/snapshot.json, diffs against the previous run,and sends a
+Telegram message on any change.
 
 Env:
   PORTAL_COOKIE   raw cookie string from the browser session (required)
@@ -15,6 +15,7 @@ Env:
   TELEGRAM_TOKEN  bot token from @BotFather
   TELEGRAM_CHAT   chat id
 """
+
 
 import json
 import os
@@ -173,7 +174,7 @@ def main():
         apps = fetch_applications()
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
-            telegram("⚠️ MS career tracker: portal rejected the session "
+            telegram("⚠️ portal rejected the session "
                      f"(HTTP {e.code}). Refresh PORTAL_COOKIE/PORTAL_CSRF.")
             sys.exit(1)
         raise

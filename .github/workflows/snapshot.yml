@@ -23,6 +23,8 @@ jobs:
     timeout-minutes: 360  # 6 hours max
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -99,14 +101,26 @@ jobs:
             echo "snapshot persisted to secret"
           fi
 
-      - name: Commit history log
+      - name: Commit history log (with rebase retry)
         run: |
           git config user.name "snapshot-sync"
           git config user.email "actions@github.com"
           git add state/history.log
           if git diff --cached --quiet; then
             echo "nothing to commit"
-          else
-            git commit -m "history update $(date -u +%F)"
-            git push
+            exit 0
           fi
+          git commit -m "history update $(date -u +%F)"
+          # Retry with rebase on push rejection (race with concurrent runs)
+          for attempt in 1 2 3; do
+            if git pull --rebase origin main; then
+              if git push origin main; then
+                echo "pushed successfully"
+                exit 0
+              fi
+            fi
+            echo "push attempt $attempt failed, retrying..."
+            sleep 5
+          done
+          echo "all push attempts failed"
+          exit 1

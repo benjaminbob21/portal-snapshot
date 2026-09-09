@@ -144,7 +144,7 @@ def diff(old, new):
                     lines.append(f"🔁 {label}: {o.get(field)} ➜ {n.get(field)}")
         else:
             title = n.get("title") or key
-            for field in ("status", "withdrawn", "location"):
+            for field in ("status", "withdrawn", "location", "applied_on"):
                 if o.get(field) != n.get(field):
                     lines.append(f"🔁 {title}: {field} {o.get(field)} ➜ "
                                  f"{n.get(field)}")
